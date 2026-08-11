@@ -168,6 +168,9 @@ A clean, documented implementation with unit tests.
 
 ## WP3 — Experimental Framework
 
+**Primary owner:** Member 3 (experimental design & analysis)  
+**Implementation owner:** Member 4 (experimental/reproducibility pipeline)
+
 Construct a reproducible framework for generating and processing streams.
 
 Experiments should include:
@@ -371,28 +374,32 @@ Responsibilities:
 
 ---
 
-## Member 3 — Experimental Lead
+## Member 3 — Experiments & Analysis Lead
 
 Responsibilities:
 
+- Experimental design
 - Stream generators
 - Exact baseline
 - Benchmarking
 - Statistical analysis
-- Reproducibility
+- Experimental interpretation
+- Overall results narrative
+- Final presentation
 
 ---
 
-## Member 4 — Visualisation & Presentation Lead
+## Member 4 — Visualization, Demo & Experiment Engineering Lead
 
 Responsibilities:
 
-- Visualisation pipeline
+- Visualization pipeline
 - Dashboard/demo
 - Figures
-- Presentation design
-- Results communication
-- Final demonstration
+- Experimental/reproducibility pipeline
+- Automated experiment execution
+- Results organisation
+- Technical demonstration
 
 ---
 
@@ -400,12 +407,28 @@ Responsibilities:
 
 These roles represent **ownership**, not isolation.
 
-Every member must be able to explain:
+The division between Members 3 and 4 is intentionally collaborative:
+
+- **Member 3** is responsible for deciding what experiments we conduct, analysing the results, interpreting their significance, and leading the final presentation.
+- **Member 4** is responsible for building the technical pipeline that executes experiments reproducibly, organises their outputs, and feeds them into the visualisation and demonstration layer.
+
+The experimental pipeline includes:
+
+- configurable experiment runs;
+- automated stream generation;
+- execution of BJKST and baseline methods;
+- metric collection;
+- result storage;
+- reproducible random seeds;
+- structured output for subsequent analysis and visualisation.
+
+Every member must still understand:
 
 - the problem;
 - the intuition behind BJKST;
 - the main algorithm;
-- the experimental results;
+- the experimental methodology;
+- the project's major results;
 - their own contribution.
 
 ---
@@ -814,8 +837,8 @@ That is the standard we are aiming for.
 |---|---|
 | Member 1 | Mathematical Theory |
 | Member 2 | Algorithm & Software |
-| Member 3 | Experiments & Analysis |
-| Member 4 | Visualisation & Presentation |
+| Member 3 | Experiments, Analysis & Final Presentation |
+| Member 4 | Visualization, Demo & Experiment Engineering |
 
 ---
 
