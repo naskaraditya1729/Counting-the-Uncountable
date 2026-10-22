@@ -1,0 +1,1302 @@
+---
+title: "Counting the Uncountable: BJKST and Distinct-Element Estimation in Massive Data Streams"
+author: 'Team members to be listed on the title page'
+date: 'Submission date to be filled on the title page'
+documentclass: report
+classoption:
+  - a4paper
+fontsize: 11pt
+geometry: "margin=1in"
+linestretch: 1.1
+colorlinks: true
+linkcolor: blue
+urlcolor: blue
+citecolor: blue
+output:
+  pdf_document:
+    latex_engine: pdflatex
+    toc: false
+    number_sections: true
+    keep_tex: false
+    pandoc_args: ["--top-level-division=chapter"]
+header-includes: |
+  \usepackage{amsmath,amssymb,amsthm}
+  \usepackage{float}
+  \usepackage{booktabs}
+  \usepackage{array}
+  \usepackage{caption}
+  \usepackage{xcolor}
+  % ---- suppress the automatic \maketitle (a manual title page is used) ----
+  \AtBeginDocument{\let\maketitle\relax}
+  \renewcommand{\bibname}{References}
+  % ---- theorem-like environments (amsthm; portable) ----
+  \theoremstyle{plain}
+  \newtheorem{theorem}{Theorem}[chapter]
+  \newtheorem{lemma}[theorem]{Lemma}
+  \newtheorem{proposition}[theorem]{Proposition}
+  \newtheorem{corollary}[theorem]{Corollary}
+  \theoremstyle{definition}
+  \newtheorem{definition}[theorem]{Definition}
+  \theoremstyle{remark}
+  \newtheorem{remark}[theorem]{Remark}
+  % ---- algorithm float (float package; avoids algorithm2e/algorithmicx) ----
+  \floatstyle{plain}
+  \newfloat{algorithm}{htbp}{loa}[chapter]
+  \floatname{algorithm}{Algorithm}
+  % ---- notation ----
+  \newcommand{\Fzero}{F_0}
+  \newcommand{\dhat}{\widehat{d}}
+  \newcommand{\eps}{\varepsilon}
+  \newcommand{\E}{\mathbb{E}}
+  \newcommand{\Prb}{\mathbb{P}}
+  \DeclareMathOperator{\Var}{Var}
+  \DeclareMathOperator{\zeros}{zeros}
+  \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+  % ---- author-facing boxes (delete or resolve before submission) ----
+  \newsavebox{\todobx}
+  \newenvironment{todobox}
+    {\par\medskip\begin{lrbox}{\todobx}\begin{minipage}{0.92\linewidth}\small\textbf{TODO (team).}\ }
+    {\end{minipage}\end{lrbox}\noindent\fcolorbox{orange}{yellow!8}{\usebox{\todobx}}\par\medskip}
+  \newsavebox{\notebx}
+  \newenvironment{authornote}
+    {\par\medskip\begin{lrbox}{\notebx}\begin{minipage}{0.92\linewidth}\small\textbf{Author note (source check).}\ }
+    {\end{minipage}\end{lrbox}\noindent\fcolorbox{blue!60!black}{blue!4}{\usebox{\notebx}}\par\medskip}
+  \newcommand{\placeholder}[1]{\textcolor{orange!80!black}{\textbf{[#1]}}}
+  \newcommand{\evid}[1]{\textsc{[#1]}}
+---
+
+<!--
+AUTHOR COMMENT -- TOOLCHAIN AND COMPILATION PREREQUISITES
+* R (>= 4.0), packages: rmarkdown and knitr only (utils is part of base R).
+* Pandoc (>= 2.x; normally bundled with RStudio), and a LaTeX distribution with
+  pdflatex (TeX Live, MiKTeX or TinyTeX). LaTeX packages used, all standard:
+  amsmath, amssymb, amsthm, float, booktabs, array, caption, xcolor, hyperref.
+* No external files are needed. Figures and tables are read from the folder
+  `results/` only if present; otherwise a labelled placeholder is printed.
+  Knit from the directory that contains `results/` (or edit `res_dir` below).
+* Command line:  Rscript -e 'rmarkdown::render("report_template.Rmd")'
+* Colour boxes: orange = TODO for the team, blue = author note flagging a point
+  in the Mathematical Lead's PDF (WP1) that should be verified. Delete both
+  kinds before final submission.
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+res_dir <- "results"   # folder in which experiment outputs are expected
+
+# Escape characters that are special in LaTeX text mode.
+tex_esc <- function(x) gsub("([_#%&$])", "\\\\\\1", x)
+```
+
+```{r helpers, include=FALSE}
+# Figure helper: includes res_dir/file if it exists, otherwise a labelled
+# placeholder float, so that \ref{fig:<label>} always resolves and knitting
+# never fails because of missing experiment output.
+todo_fig <- function(file, caption, label, what, width = 0.85) {
+  path <- file.path(res_dir, file)
+  ok <- file.exists(path)
+  if (!ok) caption <- paste("[Placeholder]", caption)
+  cat("\n\\begin{figure}[htbp]\n\\centering\n")
+  if (ok) {
+    cat(sprintf("\\includegraphics[width=%.2f\\linewidth]{%s}\n", width, path))
+  } else {
+    cat(sprintf(paste0(
+      "\\fcolorbox{orange}{yellow!8}{\\parbox{0.88\\linewidth}{\\small",
+      "\\textbf{Figure placeholder.} %s \\textit{Expected file:} \\texttt{%s}}}\n"),
+      tex_esc(what), tex_esc(path)))
+  }
+  cat(sprintf("\\caption{%s}\n\\label{fig:%s}\n\\end{figure}\n\n", caption, label))
+  invisible(ok)
+}
+
+# Table helper: renders res_dir/file (CSV) with kable if it exists and is
+# non-empty, otherwise a labelled placeholder table float.
+todo_tab <- function(file, caption, label, what) {
+  path <- file.path(res_dir, file)
+  df <- NULL
+  if (file.exists(path)) {
+    df <- tryCatch(utils::read.csv(path, stringsAsFactors = FALSE),
+                   error = function(e) NULL)
+  }
+  if (!is.null(df) && nrow(df) > 0) {
+    cat("\n\\begingroup\\small\n")
+    cat(knitr::kable(df, format = "latex", booktabs = TRUE, caption = caption,
+                     label = label, digits = 4, linesep = ""), sep = "\n")
+    cat("\n\\endgroup\n\n")
+  } else {
+    cat("\n\\begin{table}[htbp]\n\\centering\n")
+    cat(sprintf("\\caption{[Placeholder] %s}\n\\label{tab:%s}\n", caption, label))
+    cat(sprintf(paste0(
+      "\\fcolorbox{orange}{yellow!8}{\\parbox{0.88\\linewidth}{\\small",
+      "\\textbf{Table placeholder.} %s \\textit{Expected file:} \\texttt{%s}}}\n"),
+      tex_esc(what), tex_esc(path)))
+    cat("\\end{table}\n\n")
+  }
+  invisible(NULL)
+}
+```
+
+\pagenumbering{roman}
+
+\begin{titlepage}
+\centering
+\vspace*{1cm}
+{\large \placeholder{Institution, department and course/programme}\par}
+\vspace{1.8cm}
+{\Huge\bfseries Counting the Uncountable\par}
+\vspace{0.5cm}
+{\Large BJKST and Distinct-Element Estimation\\ in Massive Data Streams\par}
+\vspace{1cm}
+{\large Project Report\par}
+\vspace{1.8cm}
+
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{L{6cm}L{6cm}}
+\toprule
+\textbf{Team member} & \textbf{Student ID / e-mail} \\
+\midrule
+\placeholder{Team member 1} & \placeholder{ID / e-mail} \\
+\placeholder{Team member 2} & \placeholder{ID / e-mail} \\
+\placeholder{Team member 3} & \placeholder{ID / e-mail} \\
+\placeholder{Team member 4} & \placeholder{ID / e-mail} \\
+\bottomrule
+\end{tabular}
+
+\vspace{1.2cm}
+{\large Supervisor / instructor: \placeholder{name}\par}
+\vspace{0.4cm}
+{\large Submission date: \placeholder{date}\par}
+\vfill
+{\small Draft template. Sections marked TODO or ``placeholder'' contain no results yet.\par}
+\end{titlepage}
+
+\begin{abstract}
+\begin{todobox}
+Write the abstract last, in about 200--250 words, in this order. (1) \emph{Problem}: estimating the number of distinct elements $\Fzero$ of a stream in small memory. (2) \emph{Method}: the BJKST buffer-with-threshold estimator, implemented from first principles. (3) \emph{Evaluation}: which stream families, which accuracy parameters, how many seeds, which baselines (exact hash set; HyperLogLog only if completed). (4) \emph{Findings}: state only quantitative findings that appear in Chapter~6, with numbers copied from the generated tables. Do not describe BJKST itself as a contribution of this project.
+\end{todobox}
+\end{abstract}
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\clearpage
+\pagenumbering{arabic}
+
+# Author Guide (delete before submission) {-}
+
+This template fixes the narrative of the report: **problem $\to$ mathematical idea $\to$ algorithm $\to$ implementation $\to$ experimental evidence $\to$ interpretation $\to$ limitations**. The mathematical chapters (2 and 3) are extracted selectively from the Mathematical Lead's working paper on the BJKST estimator, referred to below as \emph{WP1}. Everything else is scaffolding with instructions.
+
+Every statement in the final report should carry one of the following evidence labels in the team's mind (they are used sparingly in the text):
+
+\begin{center}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{L{3.2cm}L{10cm}}
+\toprule
+\evid{Literature} & A result established in the cited literature (cite it). \\
+\evid{Design choice} & A decision made by this team during implementation. \\
+\evid{Observation} & A measured outcome, traceable to a file in \texttt{results/}. \\
+\evid{Interpretation} & Our explanation of an observation; must be phrased as such. \\
+\evid{Future} & Proposed work that has not been done. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Rules to follow when completing the report:
+
+- Fill figures and tables by writing the CSV/PDF files named in each placeholder into `results/`; the document picks them up on the next knit. Do not paste numbers by hand.
+- Do not claim that the implementation attains a theoretical bound until Section \ref{sec:assumption-check} has been completed.
+- Resolve or delete every orange (TODO) and blue (author note) box. The blue boxes record points in WP1 that were found ambiguous, loosely justified or unverified; they are listed so that the Mathematical Lead can confirm or correct them, and nothing has been silently altered.
+
+# Introduction {#ch:intro}
+
+## Motivation
+
+Many systems need to know *how many different* items they have seen, not how many items they have seen in total: distinct source addresses in network traffic, distinct visitors or queries in a log, distinct values of an attribute in a database column. Such counts are used for monitoring, anomaly detection and query planning \cite{fm,lru,muthu}. When the data arrive as a very long stream, or are spread over many machines, keeping a record of every item already seen can be unaffordable. Distinct-element estimation asks how much accuracy must be given up to avoid this cost.
+
+\begin{todobox}
+Add one or two concrete motivating scenarios that the team can substantiate with a citation (for example from \cite{lru} or \cite{muthu}) or leave generic. Avoid unsupported statements about industrial usage.
+\end{todobox}
+
+## Problem statement
+
+Given a stream $\sigma=(a_1,\dots,a_m)$ over a universe $[n]$, output an estimate $\dhat$ of the number $d=\Fzero(\sigma)$ of distinct items, using memory far smaller than $d$, in a single pass, with relative error at most $\eps$ except with probability at most $\delta$. The formal definitions are given in Chapter \ref{ch:foundations}; they are deliberately not repeated here.
+
+## Why exact counting is expensive in a stream
+
+An exact algorithm must in effect remember which items have appeared, so its memory grows linearly with $d$ in the worst case (Section \ref{sec:exact}). For streams with hundreds of millions of distinct items this is the bottleneck that motivates sublinear-space randomized estimators.
+
+## Objectives and scope
+
+The project (i) explains the mathematical basis of BJKST, (ii) implements the algorithm from first principles, (iii) evaluates its accuracy and efficiency experimentally against exact counting, (iv) studies its behaviour under several stream distributions, and (v) provides an interactive demonstration. A comparison with HyperLogLog is an optional extension.
+
+\begin{todobox}
+State precisely what is in scope: programming language, maximum stream length and universe size tested, which BJKST forms are implemented (identifier-storing and/or fingerprint form, Section \ref{sec:space}), and whether the median amplification (Section \ref{sec:median}) is implemented. State what is explicitly out of scope (for instance, distributed or sliding-window variants).
+\end{todobox}
+
+## Core research question and research questions
+
+**Core question.** To what extent do the theoretical guarantees of the BJKST estimator predict its measured accuracy, memory and running time, and under which conditions is approximate counting preferable to exact counting?
+
+This is refined into six research questions, each of which is revisited in Chapter \ref{ch:discussion}.
+
+\begin{description}
+\item[RQ1 (accuracy).] How does the relative error depend on $\eps$ and on the true cardinality $d$, and is the empirical failure frequency consistent with the single-copy guarantee of Theorem \ref{thm:accuracy}, provided the implementation satisfies the theorem's assumptions?
+\item[RQ2 (memory).] How do the buffer size and measured peak memory scale with $\eps$ and $d$, compared with the exact hash set?
+\item[RQ3 (runtime).] How does the per-item cost scale with stream length, and what is the overhead of hashing and pruning relative to exact counting?
+\item[RQ4 (distribution sensitivity).] Does behaviour differ across uniform, high-duplication, high-cardinality and skewed streams, as the analysis (which depends only on the set of distinct items) predicts?
+\item[RQ5 (randomness).] How large is the run-to-run variability across random seeds, how do the tails look, and what does median amplification change?
+\item[RQ6 (hashing).] How do practical hash functions compare with the pairwise independent family assumed by the analysis?
+\end{description}
+
+## Contributions of this project
+
+\begin{todobox}
+List only what has actually been done and can be verified from the repository and from \texttt{results/}. Suggested frame (delete items that do not apply): (a) an independent implementation of the BJKST buffer-with-threshold algorithm and an exact baseline; (b) a reproducible experimental study over the stream families of Chapter~\ref{ch:methodology}; (c) an interactive demonstration; (d) \emph{optional:} a HyperLogLog comparison. State explicitly that BJKST is a published algorithm \cite{bjkst} and that the contribution is the implementation and empirical study, not the algorithm.
+\end{todobox}
+
+## Organisation of the report
+
+Chapter \ref{ch:foundations} formalises the problem and the probabilistic and hashing tools; Chapter \ref{ch:bjkst} derives the BJKST estimator and its guarantees; Chapter \ref{ch:implementation} describes our implementation; Chapters \ref{ch:methodology} and \ref{ch:results} describe and report the experiments; Chapter \ref{ch:comparison} compares BJKST with exact counting (and optionally HyperLogLog); Chapter \ref{ch:demo} describes the demonstration; Chapters \ref{ch:discussion}--\ref{ch:conclusion} interpret the findings, state limitations and conclude.
+
+# Problem Formulation and Mathematical Foundations {#ch:foundations}
+
+This chapter fixes the problem and collects only the tools used in the analysis of Chapter \ref{ch:bjkst}: Chebyshev's inequality for the accuracy of one copy, Hoeffding's inequality for amplification, and pairwise independent hashing with trailing zeros for the sampling mechanism. Standard material is stated without proof and referenced to \cite{mu,mr}. This chapter follows WP1, Sections 2--4.
+
+## The streaming model
+
+Let $[n]=\{0,1,\dots,n-1\}$ be the universe. A *stream* is a sequence $\sigma=(a_1,\dots,a_m)$ with $a_t\in[n]$, presented one item at a time. A streaming algorithm makes a single pass over $\sigma$ (in the basic model), uses memory sublinear in $m$ and $n$ (ideally polylogarithmic, or polynomial in $1/\eps$ times polylogarithmic), and spends little time per item. The cost measure is the number of bits of working memory \cite{ams,muthu}. Without loss of generality $n=2^b$ is a power of two (pad the universe otherwise). The input is arbitrary but fixed in advance; all probabilities are over the algorithm's internal randomness.
+
+## Distinct elements and the cost of exact counting {#sec:exact}
+
+Let $f_i=|\{t:a_t=i\}|$ be the frequency of $i\in[n]$. The $k$-th frequency moment is $F_k=\sum_{i\in[n]}f_i^k$ with $0^0=0$ \cite{ams}; $F_1=m$ is the stream length, and
+$$\Fzero \;=\; \bigl|\{i: f_i>0\}\bigr| \;=:\; d$$
+is the number of distinct elements. Write $D\subseteq[n]$ for the set of distinct items, so $|D|=d$.
+
+Computing $d$ exactly requires $\Omega(\min\{n,m\})$ bits in the worst case, since the algorithm must essentially remember which items have occurred. WP1 also states that the same $\Omega(n)$ barrier holds for \emph{deterministic} algorithms that merely approximate $\Fzero$ within a fixed constant factor, attributing this to \cite{ams}. Hence both randomization and approximation are needed for polylogarithmic space.
+
+\begin{authornote}
+WP1, Section 2.3: the precise statement of the deterministic-approximation lower bound attributed to Alon--Matias--Szegedy should be checked against \cite{ams} before it is quoted in the final report (exact approximation factor and quantifiers). The exact-counting bound is standard but is stated without proof in WP1.
+\end{authornote}
+
+## Approximation guarantee
+
+\begin{definition}[$(\eps,\delta)$-approximation]\label{def:approx}
+A randomized algorithm outputs an $(\eps,\delta)$-approximation of $d$ if its output $\dhat$ satisfies $\Prb\bigl[\,|\dhat-d|\le\eps d\,\bigr]\ge 1-\delta$, where the probability is over the algorithm's internal randomness, not over the input.
+\end{definition}
+
+## Probabilistic tools
+
+\begin{lemma}[Chebyshev]\label{lem:cheb}
+For any random variable $X$ with finite variance and any $t>0$, $\Prb[\,|X-\E X|\ge t\,]\le \Var[X]/t^2$.
+\end{lemma}
+
+\begin{lemma}[Variance of a pairwise independent sum]\label{lem:var}
+If $X_1,\dots,X_d$ are pairwise independent, then $\Var\bigl[\sum_i X_i\bigr]=\sum_i \Var[X_i]$.
+\end{lemma}
+
+\begin{proof}
+$\Var[\sum_i X_i]=\sum_i\Var[X_i]+\sum_{i\neq j}\mathrm{Cov}(X_i,X_j)$, and pairwise independence gives $\mathrm{Cov}(X_i,X_j)=0$ for $i\ne j$.
+\end{proof}
+
+\begin{lemma}[Hoeffding]\label{lem:hoeff}
+Let $W_1,\dots,W_k$ be independent $\{0,1\}$-valued random variables and $W=\sum_j W_j$. Then for every $t>0$, $\Prb[W-\E W\ge t]\le \exp(-2t^2/k)$.
+\end{lemma}
+
+Only the second moment (Chebyshev with Lemma \ref{lem:var}) is needed to analyse a single copy of BJKST; Hoeffding is used solely for amplification (Section \ref{sec:median}). Markov's inequality, which underlies Chebyshev, is not restated; see \cite{mu,mr}.
+
+## Hash functions
+
+Let $\mathcal H$ be a family of functions $h:U\to R$, with $h$ drawn uniformly from $\mathcal H$.
+
+\begin{definition}[Pairwise independent family]\label{def:pairwise}
+$\mathcal H$ is \emph{pairwise independent} (``strongly 2-universal'' in the Carter--Wegman terminology) if for all distinct $x,y\in U$ and all $r,s\in R$, $\Prb_{h\in\mathcal H}[h(x)=r\wedge h(y)=s]=1/|R|^2$. Equivalently, each $h(x)$ is uniform on $R$ and, for distinct $x,y$, the values $h(x),h(y)$ are independent.
+\end{definition}
+
+\begin{definition}[2-universal family]\label{def:universal}
+$\mathcal H$ is \emph{2-universal} if $\Prb_{h\in\mathcal H}[h(x)=h(y)]\le 1/|R|$ for all distinct $x,y\in U$.
+\end{definition}
+
+Pairwise independence implies 2-universality \cite{cw,wc}; see also \cite{clrs}. The converse fails: the single identity map $h(x)=x$ on $R=U$ is 2-universal (it never collides) but is deterministic, hence not pairwise independent. The two notions must not be conflated: the analysis below uses a \emph{pairwise independent} $h$ for sampling (variance additivity, Lemma \ref{lem:var}) and only a \emph{2-universal} $g$ for fingerprints (union bound over collisions, Theorem \ref{thm:fingerprint}).
+
+### An explicit pairwise independent family {-}
+
+Let $F=\mathrm{GF}(2^b)$, whose elements are identified with $b$-bit strings and hence with $[n]$ when $n=2^b$. Define $\mathcal H=\{h_{a,c}:F\to F,\ h_{a,c}(x)=a\cdot x+c\ :\ a,c\in F\}$.
+
+\begin{lemma}\label{lem:gf}
+$\mathcal H$ is a pairwise independent family of functions $[n]\to[n]$. Choosing $h\in\mathcal H$ requires $2b=2\log_2 n$ random bits, which is also its description length.
+\end{lemma}
+
+\begin{proof}
+Fix distinct $x,y\in F$ and targets $r,s\in F$. The system $ax+c=r$, $ay+c=s$ has the unique solution $a=(r-s)/(x-y)$, $c=r-ax$, because $x-y\neq0$ is invertible in a field. Exactly one of the $|F|^2=n^2$ pairs $(a,c)$ realises $(h(x),h(y))=(r,s)$, so the probability is $1/n^2$.
+\end{proof}
+
+\begin{remark}
+Over a prime field $\mathbb Z_p$ the map $x\mapsto ax+c \bmod p$ is also pairwise independent into $\mathbb Z_p$, but the range is then not a power of two and the trailing-zero events below have probability only approximately $2^{-z}$. Using $\mathrm{GF}(2^b)$ makes the probabilities exact. (This matters for implementation: see Section \ref{sec:hashing-design}.)
+\end{remark}
+
+### Trailing zeros {-}
+
+For $x\in\{0,\dots,2^b-1\}$ let $\zeros(x)$ be the number of trailing zeros of its $b$-bit binary expansion, with $\zeros(0)=b$.
+
+\begin{lemma}\label{lem:tz}
+If $X$ is uniform on $\{0,\dots,2^b-1\}$, then for every integer $0\le z\le b$, $\Prb[\zeros(X)\ge z]=2^{-z}$.
+\end{lemma}
+
+\begin{proof}
+$\zeros(X)\ge z$ iff the lowest $z$ bits of $X$ are zero, i.e.\ $2^z\mid X$; exactly $2^{b-z}$ of the $2^b$ values are multiples of $2^z$.
+\end{proof}
+
+# BJKST Algorithm and Theoretical Analysis {#ch:bjkst}
+
+This chapter follows WP1, Sections 5--10, and is the mathematical core of the report. All results in it are \evid{Literature}: a re-derivation of results from \cite{bjkst} (primary source), with the buffer-with-threshold presentation in the style of \cite{chak}. Nothing here is claimed to be new.
+
+## Intuition
+
+Hash every item to a $b$-bit value. If $h$ behaves uniformly, the fraction of distinct items whose hash has at least $z$ trailing zeros is $2^{-z}$. Keeping only those items gives a small random sample of the distinct items; multiplying the sample size by $2^z$ rescales it to an estimate of $d$. Because retention depends on the \emph{value} of an item and not on the position of its occurrences, duplicates cannot change the sample, which is why the sampled quantity counts \emph{distinct} elements. The remaining difficulty is that the right level $z$ depends on the unknown $d$; BJKST finds it on the fly by raising $z$ whenever the sample exceeds a threshold.
+
+## The variant analysed and its assumptions {#sec:variant}
+
+The original paper presents three algorithms \cite{bjkst}. The variant analysed here is the **buffer-with-threshold sampling formulation**, first in an *identifier-storing form* (Algorithm \ref{alg:bjkst}) and then in a *fingerprint form* (Section \ref{sec:space}). Its analysis assumes:
+
+\begin{enumerate}
+\item[\textbf{A1}] One pass; the stream is arbitrary but fixed in advance (non-adaptive input).
+\item[\textbf{A2}] The universe is $[n]$ with $n=2^b$.
+\item[\textbf{A3}] $h:[n]\to[n]$ is drawn uniformly from the $\mathrm{GF}(2^b)$ affine family of Lemma \ref{lem:gf}; only its pairwise independence is used.
+\item[\textbf{A4}] In the fingerprint form, $g:[n]\to[M]$ is 2-universal and independent of $h$.
+\item[\textbf{A5}] The threshold is $\tau=\lceil c/\eps^2\rceil$ with $c=60$, and $0<\eps<1$.
+\end{enumerate}
+
+\begin{authornote}
+WP1 states that the formulation ``follows the style of lecture-note treatments, e.g.\ \cite{chak}'' and that \cite{bjkst} presents three algorithms. Which of the three algorithms in \cite{bjkst} (if any) coincides with Algorithm \ref{alg:bjkst}, and whether the constant $c=60$ and the choice $M=\lceil10\tau^2(b+1)^2\rceil$ come from a source or are WP1's own choices, are not stated. Confirm and cite precisely, or describe them as ``derived in WP1''. The report should not say ``the original BJKST algorithm'' without this check.
+\end{authornote}
+
+## Hash-based sampling and nested samples
+
+Fix $h$ as in A3. For each level $z\in\{0,\dots,b\}$ define the level-$z$ sample and its size
+$$S_z=\{a\in D:\ \zeros(h(a))\ge z\},\qquad Y_z=|S_z|.$$
+
+\begin{proposition}[Properties of the level-$z$ sample]\label{prop:sample}
+\begin{enumerate}
+\item For every $a\in D$ and $0\le z\le b$, $\Prb[a\in S_z]=2^{-z}$ exactly.
+\item For distinct $a\ne a'$ the events $\{a\in S_z\}$ and $\{a'\in S_z\}$ are independent.
+\item $D=S_0\supseteq S_1\supseteq S_2\supseteq\cdots$, deterministically.
+\item Membership of $a$ in $S_z$ is a function of $a$ and $h$ only; hence an item occurring $f_a$ times is retained at all of its occurrences or at none.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+(1) $h(a)$ is uniform on $[n]$ (Lemma \ref{lem:gf}), so Lemma \ref{lem:tz} applies. (2) $h(a),h(a')$ are independent, and the events are functions of them. (3) $\zeros(h(a))\ge z+1\Rightarrow\zeros(h(a))\ge z$. (4) is immediate from the definition.
+\end{proof}
+
+The nesting in (3) is what allows the algorithm to tighten its sample without re-reading the stream: the level-$(z+1)$ sample is obtained from the level-$z$ sample by discarding the items whose stored value $\zeros(h(a))$ equals exactly $z$.
+
+\begin{authornote}
+WP1 additionally says that each item survives from level $z$ to $z+1$ ``independently, in the pairwise sense, with conditional probability $1/2$''. This sentence is informal and is not used in any proof (only the deterministic nesting (3) is). It is omitted here; restore it only with a precise statement.
+\end{authornote}
+
+## The estimator
+
+Define $\dhat_z=2^zY_z$.
+
+\begin{proposition}[Mean and variance at a fixed level]\label{prop:var}
+For every $0\le z\le b$, with $\mu_z:=\E[Y_z]=d/2^z$,
+$$\E[\dhat_z]=d,\qquad \Var[Y_z]=d\,2^{-z}(1-2^{-z})\le\mu_z,\qquad \Var[\dhat_z]\le 2^z d.$$
+\end{proposition}
+
+\begin{proof}
+$Y_z=\sum_{a\in D}X_a$ with $X_a=\mathbf 1[\zeros(h(a))\ge z]$ Bernoulli$(2^{-z})$ (Proposition \ref{prop:sample}). Linearity gives $\E[Y_z]=d2^{-z}$; the $X_a$ are pairwise independent, so Lemma \ref{lem:var} gives $\Var[Y_z]=d2^{-z}(1-2^{-z})$. Finally $\Var[\dhat_z]=4^z\Var[Y_z]\le4^z\cdot d2^{-z}=2^zd$.
+\end{proof}
+
+\begin{corollary}[Chebyshev bound at a fixed level]\label{cor:cheb}
+For every \emph{fixed} level $z$ and $\eps\in(0,1)$,
+$$\Prb\bigl[\,|Y_z-\mu_z|>\eps\mu_z\,\bigr]\le\frac{\Var[Y_z]}{\eps^2\mu_z^2}\le\frac{1}{\eps^2\mu_z}.$$
+\end{corollary}
+
+**Design principle.** Corollary \ref{cor:cheb} shows that $\dhat_z$ is $\eps$-accurate with good probability as soon as $\mu_z\gtrsim1/\eps^2$. Memory is proportional to $Y_z$, so we want the largest $z$ (smallest sample) that still has $\mu_z\gtrsim1/\eps^2$. Since $d$ is unknown, so is this $z$. BJKST starts at $z=0$ and increases $z$ each time the buffer reaches the threshold $\tau=\Theta(1/\eps^2)$; because the samples are nested, this self-tuning costs nothing.
+
+## The algorithm
+
+\begin{algorithm}[htbp]
+\caption{BJKST, buffer-with-threshold, identifier-storing form}\label{alg:bjkst}
+\small
+\begin{tabbing}
+\hspace{1.8em}\=\hspace{1.5em}\=\hspace{1.5em}\=\hspace{1.5em}\=\kill
+\textbf{Require:} stream $a_1,\dots,a_m\in[n]$, $n=2^b$; accuracy $\eps\in(0,1)$ \\
+1:\> $\tau\leftarrow\lceil c/\eps^2\rceil$ \hspace{1em} (c = 60 suffices; Theorem \ref{thm:accuracy}) \\
+2:\> choose $h$ uniformly from the pairwise independent family of Lemma \ref{lem:gf} \\
+3:\> $B\leftarrow\emptyset$, \ $z\leftarrow0$ \\
+4:\> \textbf{for each} item $a$ of the stream \textbf{do} \\
+5:\>\> \textbf{if} $\zeros(h(a))\ge z$ \textbf{then} \\
+6:\>\>\> $B\leftarrow B\cup\{(a,\zeros(h(a)))\}$ \hspace{1em} ($B$ is a set: a repeated $a$ is a no-op) \\
+7:\>\> \textbf{while} $|B|\ge\tau$ \textbf{do} \\
+8:\>\>\> $z\leftarrow z+1$ \\
+9:\>\>\> $B\leftarrow\{(x,\beta)\in B:\ \beta\ge z\}$ \\
+10:\> \textbf{return} $\dhat=|B|\cdot2^z$
+\end{tabbing}
+\end{algorithm}
+
+## Correctness invariant
+
+\begin{lemma}[Invariant]\label{lem:inv}
+Let $D_t$ be the set of distinct items among $a_1,\dots,a_t$. At all times during the processing of $a_t$, immediately after the insertion step and immediately after each pruning step, the buffer satisfies $B=\{(a,\zeros(h(a))):a\in D_t,\ \zeros(h(a))\ge z\}$.
+\end{lemma}
+
+\begin{proof}
+Induction over the steps. Initially $B=\emptyset$, $z=0$, $D_0=\emptyset$. Insertion of $a_t$ adds its pair exactly when $\zeros(h(a_t))\ge z$; the pair is a function of $a_t$ alone, so re-inserting a repeated item changes nothing. Pruning from level $z$ to $z+1$ removes exactly the pairs with $\beta=z$, which is precisely the difference between the level-$z$ and level-$(z+1)$ sets. A pair removed at some level $z'$ has $\zeros<z'\le z$ for all later $z$, so it never qualifies for reinsertion.
+\end{proof}
+
+\begin{corollary}[Final state]\label{cor:final}
+Let $Z$ denote the final value of $z$, with $Y_z=0$ for $z>b$. Then, deterministically, $|B|=Y_Z<\tau$ and $Y_z\ge\tau$ for all $z<Z$; that is, $Z=\min\{z\ge0:Y_z<\tau\}$, and the output is $\dhat=2^ZY_Z=\dhat_Z$.
+\end{corollary}
+
+\begin{proof}
+After the last while-loop $|B|<\tau$, and by Lemma \ref{lem:inv} at the end of the stream $|B|=Y_Z$. For $z<Z$ the algorithm left level $z$ at some time $t$ because $|B|\ge\tau$; by the invariant $B$ then equalled $\{a\in D_t:\zeros(h(a))\ge z\}\subseteq S_z$, so $Y_z\ge\tau$.
+\end{proof}
+
+Corollary \ref{cor:final} is the key structural fact: the output is exactly the estimator $\dhat_z$ of the previous section evaluated at the \emph{random} level $Z$, the first level at which the full-stream sample falls below $\tau$. It also shows that $Z$ and the output depend only on $h$ and on the \emph{set} $D$, not on the order or multiplicities of the stream; this \evid{Literature}-derived consequence is tested empirically in Chapter \ref{ch:results} and is a unit-test target in Chapter \ref{ch:implementation}. The subtlety is that $Z$ is random, so Corollary \ref{cor:cheb} cannot be applied at $Z$ directly. The proof of the next theorem handles this with a union bound over the levels that can matter.
+
+## Accuracy of a single copy
+
+\begin{theorem}[Accuracy of one copy]\label{thm:accuracy}
+Let $0<\eps<1$, $c=60$ and $\tau=\lceil c/\eps^2\rceil$. Then Algorithm \ref{alg:bjkst} outputs $\dhat$ with $\Prb[\,|\dhat-d|\le\eps d\,]\ge 5/6$.
+\end{theorem}
+
+\begin{proof}
+Write $\mu_z=d/2^z$. If $d<\tau/2$ then $Y_0=d<\tau$, so $z$ is never incremented, $Z=0$ and the output is exactly $d$. Assume $d\ge\tau/2$ and define the target level $z^*=\min\{z\ge0:\mu_z<\tau/2\}$. Since $\mu_b=d/n\le1<\tau/2$, we have $z^*\le b$. By minimality and halving, if $z^*\ge1$ then $\mu_{z^*-1}\ge\tau/2$, hence
+\begin{equation}\label{eq:mustar}
+\frac{\tau}{4}\le\mu_{z^*}<\frac{\tau}{2}.
+\end{equation}
+(The case $z^*=0$ would give $d=\mu_0<\tau/2$, excluded by assumption; so $z^*\ge1$ from now on.)
+
+By Corollary \ref{cor:final} the output is wrong, i.e.\ $|2^ZY_Z-d|>\eps d$, only if $|Y_Z-\mu_Z|>\eps\mu_Z$ (multiply by $2^{-Z}$). Hence the failure event is contained in $E_1\cup E_2$, where
+$$E_1=\{Z\ge z^*+1\},\qquad E_2=\{\exists z\le z^*:\ |Y_z-\mu_z|>\eps\mu_z\}.$$
+Indeed, if $Z\le z^*$ and the output is wrong, take $z=Z$.
+
+\emph{Bounding $E_1$ (level overshoots).} By Corollary \ref{cor:final}, $Z\ge z^*+1$ implies $Y_{z^*}\ge\tau$. Since $\mu_{z^*}<\tau/2$, this means $Y_{z^*}-\mu_{z^*}>\tau-\mu_{z^*}>\tau/2$. Chebyshev with $\Var[Y_{z^*}]\le\mu_{z^*}$ (Proposition \ref{prop:var}) gives
+$$\Prb[E_1]\le\frac{\mu_{z^*}}{(\tau-\mu_{z^*})^2}\le\frac{\tau/2}{(\tau/2)^2}=\frac2\tau\le\frac2c,$$
+where the middle inequality uses that $\mu\mapsto\mu/(\tau-\mu)^2$ is increasing on $(0,\tau)$, and the last uses $\tau\ge c/\eps^2\ge c$.
+
+\emph{Bounding $E_2$ (bad concentration at low levels).} By a union bound and Corollary \ref{cor:cheb}, $\Prb[E_2]\le\sum_{z=0}^{z^*}1/(\eps^2\mu_z)$. Since $\mu_z=\mu_{z^*}2^{z^*-z}$, the sum is geometric:
+$$\sum_{z=0}^{z^*}\frac{1}{\eps^2\mu_z}=\frac{1}{\eps^2\mu_{z^*}}\sum_{j=0}^{z^*}2^{-j}<\frac{2}{\eps^2\mu_{z^*}}\le\frac{8}{\eps^2\tau}\le\frac8c,$$
+using \eqref{eq:mustar} and $\tau\ge c/\eps^2$.
+
+\emph{Conclusion.} $\Prb[\text{fail}]\le\Prb[E_1]+\Prb[E_2]\le10/c=1/6$ for $c=60$.
+\end{proof}
+
+\begin{remark}[Why the argument is shaped this way]
+The output is $\dhat_Z$ at a random level $Z$, so one cannot simply apply Chebyshev at $Z$. The proof (i) shows that $Z$ does not exceed the deterministic target $z^*$, where $\mu_{z^*}=\Theta(1/\eps^2)$, except with small probability, and (ii) takes a union bound of the level-wise Chebyshev failures over all levels $\le z^*$. Because $\mu_z$ doubles at each level moving down, the failure probabilities form a geometric series dominated by its last term, so the union bound costs only a constant factor. Only pairwise independence of $h$ was used.
+\end{remark}
+
+\begin{authornote}
+(i) The parenthetical on $z^*=0$ in WP1 treats it as a trivial case with failure probability $0$; since $z^*=0$ contradicts $d\ge\tau/2$, the case cannot occur, and the text above says so. (ii) The constant $c=60$ is chosen to make $10/c=1/6$; it is a proof artefact, so the \emph{measured} failure frequency may be far below $1/6$, and measured errors should not be interpreted as ``violating'' or ``confirming'' the theorem unless this is taken into account. (iii) Re-check the constants $2/c$ and $8/c$ independently before the report is submitted; the arithmetic above reproduces WP1 and is consistent.
+\end{authornote}
+
+## Space complexity and update time {#sec:space}
+
+### Identifier-storing form {-}
+
+By Corollary \ref{cor:final} and the loop condition, $|B|<\tau$ at the end of each item's processing and $|B|\le\tau$ at all times. Each entry stores an identifier ($b=\log_2n$ bits) and a $\zeros$-value (at most $\lceil\log_2(b+1)\rceil$ bits); the counter $z$ needs $O(\log b)$ bits and $h$ needs $2\log_2n$ bits (Lemma \ref{lem:gf}). The total is
+$$O\!\left(\frac{1}{\eps^2}\log n\right)\ \text{bits.}$$
+
+### Fingerprint form {-}
+
+The dominant cost is the identifiers. They can be replaced by short fingerprints: choose a second, independent 2-universal function $g:[n]\to[M]$ and store $(g(a),\zeros(h(a)))$ instead of $(a,\zeros(h(a)))$; duplicate detection is then done on fingerprints. The danger is a false collision, which makes a new item look like a duplicate and causes undercounting.
+
+\begin{lemma}[Few items ever enter the buffer]\label{lem:few}
+Let $I$ be the set of distinct items ever inserted into $B$ by the identifier-storing algorithm. Then, deterministically, $|I|\le\tau(b+1)$.
+\end{lemma}
+
+\begin{proof}
+Insertions occur only at levels $0,\dots,b$ (no item has $\zeros>b$). At any level the buffer starts with fewer than $\tau$ elements, each insertion increases $|B|$ by one, and the level is left as soon as $|B|=\tau$; so at most $\tau$ insertions occur per level. A pruned item is never reinserted (Lemma \ref{lem:inv}), so no item is counted twice.
+\end{proof}
+
+\begin{theorem}[Space of the fingerprint form]\label{thm:fingerprint}
+Take $M=\lceil10\tau^2(b+1)^2\rceil$. With $g$ independent of $h$, the fingerprint form outputs a $(1\pm\eps)$-approximation with probability at least $2/3$ and uses
+$$O\!\left(\log n+\frac1{\eps^2}\Bigl(\log\frac1\eps+\log\log n\Bigr)\right)\ \text{bits.}$$
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+Condition on $h$. While $g$ has no collision among the items of $I$, the fingerprint run is step-for-step identical to the identifier-storing run and has the same output. $I$ is determined by $h$ and the stream alone, and $g$ is independent of $h$, so by 2-universality and Lemma \ref{lem:few},
+$$\Prb[\exists x\ne y\in I:g(x)=g(y)]\le\binom{|I|}{2}\frac1M\le\frac{\tau^2(b+1)^2}{2M}\le\frac1{20}.$$
+With Theorem \ref{thm:accuracy}, the total failure probability is at most $\tfrac16+\tfrac1{20}=\tfrac{13}{60}<\tfrac13$. For space, each stored entry costs $\lceil\log_2M\rceil+\lceil\log_2(b+1)\rceil$ bits and $\log M=O(\log\tau+\log b)=O(\log\tfrac1\eps+\log\log n)$, so the buffer takes $O(\tau(\log\tfrac1\eps+\log\log n))$ bits; the two hash functions are described in $O(\log n)$ bits and $z$ takes $O(\log\log n)$ bits.
+\end{proof}
+
+The two space bounds must be kept apart: the identifier-storing form needs $\Theta(\tau\log n)$ bits for the buffer, the fingerprint form $O(\tau(\log\frac1\eps+\log\log n))$, at the price of an additional failure probability of $1/20$ and of the second hash function $g$.
+
+\begin{authornote}
+WP1, proof of the fingerprint theorem: (i) the step ``$M\le\mathrm{poly}(n)$'' used to bound the description of $g$ and $h$ by $O(\log n)$ bits holds only if $1/\eps\le\mathrm{poly}(n)$ (since $\tau=\Theta(1/\eps^2)$ enters $M$); (ii) the description length of a 2-universal $g$ into $[M]$ depends on the family chosen, which WP1 does not specify. Both points affect only the additive $O(\log n)$ term, but should be stated explicitly if the term is quoted.
+\end{authornote}
+
+### Update time {-}
+
+Each item costs $O(1)$ hash evaluations (field operations in $\mathrm{GF}(2^b)$) and a dictionary lookup. Pruning rescans $B$ but is triggered at most $b+1$ times, and WP1 charges each level's scan to the at most $\tau$ insertions made at that level, giving $O(1)$ expected (amortised) time per item with a hash table.
+
+\begin{authornote}
+WP1, Section 8.3: a rescan at level $z$ touches up to $\tau$ stored entries even if few insertions occurred at that level, so the stated charging argument is only a sketch. What the argument does show is that total pruning work is $O((b+1)\tau)$, which is $O(1)$ per item only when $m=\Omega(\tau b)$. Also, one hash evaluation in $\mathrm{GF}(2^b)$ is $O(1)$ only in a word-RAM-style cost model where $b$-bit field multiplication counts as constant time. Treat the $O(1)$ amortised claim as \evid{Literature}/WP1 \emph{unverified} and check it against the measured runtime in Section \ref{sec:res-runtime}.
+\end{authornote}
+
+## Success-probability amplification (optional) {#sec:median}
+
+The guarantees above are for a **single copy** with success probability at least $2/3$ (indeed $5/6$ for the identifier-storing form). Amplification is a separate, optional layer.
+
+\begin{theorem}[Median trick]\label{thm:median}
+Run $k=\lceil18\ln(1/\delta)\rceil$ independent copies (independent choices of $h$ and, where used, $g$) and output the median $\tilde d$ of their outputs. Then $\Prb[|\tilde d-d|\le\eps d]\ge1-\delta$.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+Let $W_j=1$ if copy $j$ is wrong. The $W_j$ are independent with $\Prb[W_j=1]\le1/3$, so $\E[W]\le k/3$ for $W=\sum_jW_j$. If fewer than $k/2$ copies are wrong, more than half the outputs lie in $[(1-\eps)d,(1+\eps)d]$, and so does their median. Hence the median fails only if $W\ge k/2$, and by Lemma \ref{lem:hoeff} with $t=k/6$, $\Prb[W\ge k/2]\le\Prb[W-\E W\ge k/6]\le\exp(-2(k/6)^2/k)=e^{-k/18}\le\delta$. The case $\Prb[W_j=1]<1/3$ is handled by stochastic domination.
+\end{proof}
+
+\begin{corollary}[Overall guarantee]\label{cor:overall}
+There is a one-pass randomized streaming algorithm which, for any $\eps,\delta\in(0,1)$, outputs an $(\eps,\delta)$-approximation of $\Fzero$ using
+$$O\!\left(\log\frac1\delta\cdot\Bigl(\log n+\frac1{\eps^2}\Bigl(\log\frac1\eps+\log\log n\Bigr)\Bigr)\right)\ \text{bits.}$$
+\end{corollary}
+
+## Context: related approaches and optimality
+
+*Flajolet--Martin.* The trailing-zeros idea comes from Flajolet and Martin \cite{fm}, who track the maximum of $\zeros(h(a))$; that maximum is about $\log_2d$, giving a constant-factor estimate under idealised (fully random) hashing. Alon, Matias and Szegedy \cite{ams} showed that pairwise independent hashing suffices for a constant-factor approximation. BJKST keeps a *sample* of items rather than a single maximum, which is what buys $(1\pm\eps)$ accuracy under only pairwise independence.
+
+*Minimum-value variant.* According to WP1, another presentation in \cite{bjkst} keeps the $t=\Theta(1/\eps^2)$ smallest hash values and estimates $d$ from the $t$-th smallest. Both are instances of ``sample by hash value, calibrate by the retention probability''. This variant is not analysed here and is not implemented unless stated in Chapter \ref{ch:implementation}.
+
+*Optimality (context only).* Any randomized $(\eps,1/3)$-approximation of $\Fzero$ needs $\Omega(1/\eps^2)$ bits \cite{iw,wood} and $\Omega(\log n)$ bits; Kane, Nelson and Woodruff \cite{knw} gave an algorithm with $O(1/\eps^2+\log n)$ bits. By WP1, the fingerprint bound of Theorem \ref{thm:fingerprint} is within a $\log(1/\eps)+\log\log n$ factor of the $1/\eps^2$ term. This is cited only to help interpret the memory measured in Chapter \ref{ch:results}; we do not implement or evaluate the optimal algorithm.
+
+## Summary of assumptions and limitations of the analysis
+
+\begin{itemize}
+\item The probabilities are over $h$ (and $g$) only; the stream is not adaptive to the random choices (A1). Guarantees are for a pairwise independent $h$ from the $\mathrm{GF}(2^b)$ family (A3); they say nothing about, e.g., a 64-bit mixing function used in practice.
+\item The $5/6$ bound is for a single copy and is loose because of the constant $c=60$; $1-\delta$ requires the median construction.
+\item The estimate is exact when $d<\tau/2$ (Theorem \ref{thm:accuracy}, first case), so differences between BJKST and exact counting only appear for larger $d$.
+\item The identifier-storing space bound is not the fingerprint bound; they are not interchangeable.
+\end{itemize}
+
+# Implementation and System Design {#ch:implementation}
+
+This chapter describes what the team built and why. It must separate the algorithm taken from the literature (Chapter \ref{ch:bjkst}) from the engineering choices made here.
+
+\begin{todobox}
+Nothing in this chapter may be written until the corresponding code exists in the repository. Describe the code as it \emph{is}, give the commit hash used for all reported results, and do not describe planned features in the present tense.
+\end{todobox}
+
+## System architecture
+
+\begin{todobox}
+Insert an architecture diagram (module boxes and data flow): stream generator $\to$ stream reader $\to$ \{BJKST sketch, exact baseline, optional HyperLogLog\} $\to$ metrics logger $\to$ results files $\to$ report/plots/dashboard. List the modules and their responsibilities in a table. Figure placeholder below.
+\end{todobox}
+
+```{r fig-architecture, results='asis'}
+todo_fig("fig_architecture.pdf",
+         "System architecture of the implementation: data flow from stream generators through the sketch and baseline to the results files.",
+         "architecture",
+         "Block diagram of modules and data flow (generator, sketch, baseline, metrics, results).")
+```
+
+## Language, environment and dependencies
+
+\begin{table}[htbp]
+\centering
+\caption{Implementation environment (to be completed by the team).}\label{tab:env}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{L{4.2cm}L{9cm}}
+\toprule
+\textbf{Item} & \textbf{Value} \\
+\midrule
+Language and version & \placeholder{e.g.\ language, compiler/interpreter version} \\
+Libraries (hashing, data structures) & \placeholder{list with versions; state which are standard library} \\
+Operating system / CPU / RAM & \placeholder{from the machine used for the reported experiments} \\
+Repository and commit & \placeholder{URL and commit hash used for results} \\
+Build/run commands & \placeholder{exact commands} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+## Core BJKST implementation
+
+The implementation targets Algorithm \ref{alg:bjkst} (identifier-storing form).
+
+\begin{todobox}
+Describe: (i) how $b$ and $n=2^b$ are chosen for the item-identifier type; (ii) the buffer data structure (hash map from item to stored $\zeros$ value, or alternative) and why; (iii) how $\tau=\lceil c/\eps^2\rceil$ is set, and whether $c=60$ (the proof constant) or a smaller tuned constant is used; if the latter, state that the guarantee of Theorem \ref{thm:accuracy} then no longer applies as proved; (iv) the pruning step; (v) the interface (update, estimate, reset, memory accounting). Include a short code excerpt only for the update/prune logic if it clarifies a decision.
+\end{todobox}
+
+## Hashing and data-structure choices {#sec:hashing-design}
+
+The analysis requires a pairwise independent $h$ with exact trailing-zero probabilities (A3). Candidate choices are summarised in Table \ref{tab:hash-choices}; the team must record which were implemented.
+
+\begin{table}[htbp]
+\centering
+\caption{Candidate hash functions and their relationship to the assumptions of Chapter \ref{ch:bjkst}.}\label{tab:hash-choices}
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{tabular}{L{3.6cm}L{4.4cm}L{3.4cm}L{2cm}}
+\toprule
+\textbf{Hash function} & \textbf{Property relative to the theory} & \textbf{Covered by Theorem \ref{thm:accuracy}?} & \textbf{Status} \\
+\midrule
+Affine map over $\mathrm{GF}(2^b)$ (Lemma \ref{lem:gf}) & Pairwise independent, exact $2^{-z}$ & Yes, if implemented correctly & \placeholder{TBD} \\
+Affine map mod a prime $p$ & Pairwise independent into $\mathbb Z_p$; trailing-zero probabilities only approximately $2^{-z}$ & Not exactly (see Remark after Lemma \ref{lem:gf}) & \placeholder{TBD} \\
+General-purpose 64-bit mixing/hash function & No pairwise-independence guarantee proved & No & \placeholder{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{todobox}
+For the $\mathrm{GF}(2^b)$ hash, record the irreducible polynomial used and how field multiplication is implemented. For the fingerprint function $g$ (if implemented), record the 2-universal family and $M$.
+\end{todobox}
+
+### Checking the implementation against the assumptions {#sec:assumption-check}
+
+Theorem \ref{thm:accuracy} is claimed for **our** implementation only if all of the following are verified; until then the report may speak only of the \emph{algorithm's} guarantee, not of ours.
+
+\begin{todobox}
+Tick each item with evidence (test name or code reference): (1) $h$ is drawn from a family that is pairwise independent with exact $2^{-z}$ trailing-zero probabilities (or the deviation is documented); (2) $h$ is drawn once, independently of the stream, and the stream is generated independently of the seed; (3) the buffer is a set keyed by item identity (or fingerprint, with $g$ independent of $h$); (4) $\tau$ uses $c=60$; (5) identifiers fit in $b$ bits.
+\end{todobox}
+
+## Stream-processing design
+
+\begin{todobox}
+Describe how streams are produced and consumed (generated on the fly versus read from disk; chunking; whether the stream is materialised in memory, which would distort memory measurements), how the same stream is fed to the sketch and to the baseline, and how seeds for the stream and for the sketch are separated.
+\end{todobox}
+
+## Exact baseline
+
+The baseline stores every item in a hash set and reports its cardinality; it provides the ground truth $d$ for all experiments and the exact-counting reference for memory and runtime (Section \ref{sec:exact}). \placeholder{Name the container type used and note that its memory includes language-level overhead.}
+
+## Unit tests and correctness validation
+
+The invariants proved in Chapter \ref{ch:bjkst} translate directly into tests. The following are \evid{Future} until implemented; replace by actual test names and results.
+
+\begin{enumerate}
+\item \textbf{Exactness for small $d$:} if $d<\tau/2$, the output equals $d$ (Theorem \ref{thm:accuracy}, first case).
+\item \textbf{Duplicate insensitivity:} feeding each item any number of times and in any order does not change the output for a fixed $h$ (Corollary \ref{cor:final}).
+\item \textbf{Invariant:} after every update, $B$ equals the set in Lemma \ref{lem:inv}, recomputed by brute force on small streams.
+\item \textbf{Buffer bound:} $|B|<\tau$ after every update.
+\item \textbf{Monotone level:} $z$ never decreases.
+\item \textbf{Trailing-zeros function:} $\zeros(0)=b$ and agreement with a naive loop on small $b$.
+\item \textbf{Hash family:} for small $b$, exhaustive enumeration of all $(a,c)$ confirms pairwise independence and $\Prb[\zeros\ge z]=2^{-z}$.
+\item \textbf{Fingerprint form:} identical output to the identifier-storing form whenever no fingerprint collision occurs.
+\end{enumerate}
+
+\begin{todobox}
+Add a table of tests with pass/fail status and the date, generated from the test runner's output if possible.
+\end{todobox}
+
+## Implementation optimisations
+
+\begin{todobox}
+List only optimisations actually implemented (for example a lazy pruning strategy, bit-level tricks for $\zeros$, memory layout of the buffer, batching). For each, state whether it changes the algorithm's output (it must not) and how that was checked.
+\end{todobox}
+
+## Source algorithm versus engineering choices
+
+\begin{table}[htbp]
+\centering
+\caption{Separation of the source algorithm from our own choices (to be completed).}\label{tab:source-vs-ours}
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{tabular}{L{3.4cm}L{4.4cm}L{5.2cm}}
+\toprule
+\textbf{Aspect} & \textbf{From the literature / WP1} & \textbf{Our implementation choice} \\
+\midrule
+Sampling rule and estimator & Retain $\zeros(h(a))\ge z$; output $|B|2^z$ & \placeholder{confirm identical} \\
+Threshold $\tau$ & $\lceil60/\eps^2\rceil$ & \placeholder{value of $c$ used} \\
+Hash family & $\mathrm{GF}(2^b)$ affine & \placeholder{actual hash} \\
+Buffer structure & ``a set'' & \placeholder{data structure} \\
+Fingerprints & $g$ 2-universal, $M=\lceil10\tau^2(b+1)^2\rceil$ & \placeholder{implemented or not} \\
+Amplification & Median of $\lceil18\ln(1/\delta)\rceil$ copies & \placeholder{implemented or not} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+# Experimental Methodology {#ch:methodology}
+
+This chapter specifies the experiments. Unless stated otherwise, everything here is a \emph{proposal}; the status table below must be updated to show what was actually run, so that the report distinguishes designed from completed experiments.
+
+## Research questions and hypotheses
+
+The hypotheses below are \evid{Future} predictions derived from the theory; they are to be tested, not assumed. They hold for our implementation only to the extent that Section \ref{sec:assumption-check} is completed.
+
+\begin{description}
+\item[H1 (RQ1).] For $d\ge\tau/2$ the relative error is of order $\eps$ or smaller, and the fraction of trials with relative error $>\eps$ is at most $1/6$ (Theorem \ref{thm:accuracy}); it may be much smaller because $c=60$ is conservative. For $d<\tau/2$ the error is exactly $0$.
+\item[H2 (RQ2).] The buffer size stays below $\tau=\lceil c/\eps^2\rceil$ and does not grow with $d$, while the exact set grows linearly in $d$.
+\item[H3 (RQ3).] Per-item time of BJKST is roughly constant in stream length (Section \ref{sec:space}, subject to the caveat in the author note there).
+\item[H4 (RQ4).] The output depends only on the set of distinct items and on $h$ (Corollary \ref{cor:final}); hence at equal $d$, error should not depend on frequencies or order.
+\item[H5 (RQ5).] The error distribution across seeds is concentrated at scale $\eps$; the median of several copies reduces the tail.
+\item[H6 (RQ6).] Hash functions that are not pairwise independent may match the pairwise independent family on benign streams but may differ on structured streams.
+\end{description}
+
+## Experimental design and variables
+
+\begin{table}[htbp]
+\centering
+\caption{Experimental factors. Entries in brackets are to be chosen by the team and fixed before running.}\label{tab:factors}
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{tabular}{L{3.4cm}L{5cm}L{4.4cm}}
+\toprule
+\textbf{Factor} & \textbf{Symbol / definition} & \textbf{Levels} \\
+\midrule
+Accuracy parameter & $\eps$, threshold $\tau=\lceil c/\eps^2\rceil$ & \placeholder{e.g.\ list of $\eps$} \\
+Constant in threshold & $c$ & \placeholder{60 and optionally smaller values, reported separately} \\
+Universe size & $n=2^b$ & \placeholder{values of $b$} \\
+Stream length & $m$ & \placeholder{values of $m$} \\
+True cardinality & $d$ & \placeholder{values or ratios $d/m$} \\
+Stream family & Section \ref{sec:generators} & uniform, high-duplication, high-cardinality, skewed \\
+Hash family & Table \ref{tab:hash-choices} & \placeholder{levels} \\
+Random seed & independent seeds for stream and sketch & \placeholder{number of seeds} \\
+Number of copies & $k$ (median) & \placeholder{1 and optional larger} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+When one factor is varied, all others are held at the baseline values recorded in the configuration file (Appendix \ref{app:config}).
+
+## Stream generators {#sec:generators}
+
+All generators take $(n,m,\text{parameters},\text{seed})$ and return a stream over $[n]$; the true cardinality $d$ is always obtained from the exact baseline, never assumed from the generator's parameters.
+
+\begin{description}
+\item[Uniform.] Each $a_t$ is drawn independently and uniformly from $[n]$ (or from a pool of $u$ items). The resulting $d$ is random.
+\item[High-duplication.] Choose $D_0\subseteq[n]$ with $|D_0|=d_0\ll m$ uniformly without replacement; the stream contains each item of $D_0$ once and the remaining $m-d_0$ positions are drawn uniformly from $D_0$; the order is then shuffled.
+\item[High-cardinality.] A stream of $m$ items drawn without replacement, so that $d=m$ (every item distinct); requires $m\le n$.
+\item[Skewed.] Items are ranked and item of rank $i$ is drawn with probability proportional to $i^{-s}$ (Zipf exponent $s>0$), from a pool of $u$ ranked items; $d$ is random and typically much smaller than $m$.
+\end{description}
+
+\begin{todobox}
+Fix the numerical parameters ($n$, $m$, $d_0$, $u$, $s$) and justify each choice. Optionally add an \emph{ordering} factor (random, sorted, blocked) to test H4 directly.
+\end{todobox}
+
+## Algorithms and baselines
+
+BJKST (identifier-storing form; fingerprint form and median of $k$ copies if implemented); the exact hash set; and, as an extension, HyperLogLog. HyperLogLog \placeholder{reference to be added; it is not in the source bibliography} is included only if implemented and tested, and is labelled as an extension wherever it appears.
+
+## Metrics
+
+For a trial with true cardinality $d$ and output $\dhat$:
+$$\text{absolute error}=|\dhat-d|,\qquad \text{relative error}=\frac{|\dhat-d|}{d},\qquad \text{failure indicator}=\mathbf 1\bigl[\,|\dhat-d|>\eps d\,\bigr].$$
+The empirical failure rate over $N$ independent trials estimates the failure probability of Definition \ref{def:approx} for the chosen $\eps$. Further metrics:
+
+\begin{itemize}
+\item \textbf{Runtime:} wall-clock time for processing the full stream, excluding stream generation, and derived time per item.
+\item \textbf{Memory (two distinct measures, never mixed):} (a) \emph{logical sketch size}, the maximum $|B|$ reached and the bit count implied by the model of Section \ref{sec:space}; (b) \emph{measured peak process memory} from the operating system or language runtime, which includes overhead.
+\item \textbf{Memory saving:} $1-M_{\mathrm{BJKST}}/M_{\mathrm{exact}}$, computed separately for each memory measure.
+\end{itemize}
+
+## Repeated trials and statistical summaries
+
+Each configuration is run with $N=\placeholder{number}$ independent seeds. Summaries reported: mean, median, standard deviation and selected quantiles of the relative error; the empirical failure rate with a confidence interval (method to be stated, e.g.\ Wilson); and, for runtime and memory, medians with spread. The number of seeds must be large enough that the failure-rate interval is informative at the level being compared ($1/6$ for a single copy; $\delta$ for the median construction).
+
+## Computing environment and measurement procedure
+
+\begin{todobox}
+Record hardware, operating system, runtime version, whether other processes were running, CPU frequency policy, warm-up runs, how peak memory is measured (and its resolution), and the number of repeated timings per configuration. Runtime and memory must be measured in a process that does not also hold the generated stream in memory unless the stream is common to all algorithms and this is stated.
+\end{todobox}
+
+## Reproducibility protocol
+
+\begin{todobox}
+Specify: a single configuration file listing every parameter; fixed master seed and the rule deriving per-trial seeds; raw per-trial results written as CSV with the schema in Appendix \ref{app:config}; plotting scripts that read only from \texttt{results/}; the commit hash printed into each results file; and the exact command that regenerates every file used in Chapter~\ref{ch:results}.
+\end{todobox}
+
+## Status of experiments
+
+\begin{table}[htbp]
+\centering
+\caption{Planned experiments and completion status (update before submission).}\label{tab:exp-status}
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{tabular}{L{1.1cm}L{5.4cm}L{3.8cm}L{2.4cm}}
+\toprule
+\textbf{ID} & \textbf{Purpose} & \textbf{Output file(s)} & \textbf{Status} \\
+\midrule
+E1 & Accuracy versus $\eps$ and $d$ & \texttt{fig\_accuracy\_*} & \placeholder{TBD} \\
+E2 & Memory versus $d$, $\eps$ & \texttt{fig\_memory\_*} & \placeholder{TBD} \\
+E3 & Runtime versus $m$ & \texttt{fig\_runtime\_*} & \placeholder{TBD} \\
+E4 & Error--memory trade-off & \texttt{fig\_tradeoff\_*} & \placeholder{TBD} \\
+E5 & Stream-distribution sensitivity & \texttt{fig\_distribution\_*} & \placeholder{TBD} \\
+E6 & Variability across seeds, failure rate & \texttt{fig\_seed\_*} & \placeholder{TBD} \\
+E7 & Hash-function sensitivity & \texttt{fig\_hash\_*} & \placeholder{TBD} \\
+E8 & HyperLogLog comparison (extension) & \texttt{fig\_hll\_*} & \placeholder{TBD or not planned} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+# Experimental Results {#ch:results}
+
+Each section states what is tested, then shows a figure or table that is generated from files in `results/` (a labelled placeholder appears until the file exists), then provides a slot for the observed result and an interpretation prompt. Observed results must be copied from the generated outputs; interpretations must be phrased as interpretations.
+
+## Accuracy
+
+*Tested:* the relative error of BJKST as a function of $\eps$ and $d$, and its agreement with the target $\eps$ (RQ1, H1).
+
+```{r fig-accuracy, results='asis'}
+todo_fig("fig_accuracy_error_vs_eps.pdf",
+         "Relative error of BJKST against the accuracy parameter $\\varepsilon$ for several true cardinalities (median and quantile band over seeds).",
+         "accuracy",
+         "Plot of relative error vs epsilon, one curve per d, with the line y = epsilon for reference.")
+```
+
+```{r tab-accuracy, results='asis'}
+todo_tab("tab_accuracy_summary.csv",
+         "Accuracy summary per configuration: mean, median and quantiles of relative error and empirical failure rate.",
+         "accuracy-summary",
+         "CSV with columns: stream, n, m, eps, d_true, trials, mean_rel_err, median_rel_err, q95_rel_err, failure_rate.")
+```
+
+\begin{todobox}
+\textbf{Observed result:} state, with numbers from Table~\ref{tab:accuracy-summary}, the error levels per $\eps$, the regime in which the output was exact ($d<\tau/2$), and the empirical failure rate against $1/6$. \textbf{Interpretation prompt:} is the measured error of the order predicted by $\eps$? If the failure rate is far below $1/6$, relate this to the constant $c=60$ (author note after Theorem~\ref{thm:accuracy}) rather than to a better-than-proved algorithm.
+\end{todobox}
+
+## Memory usage and scaling
+
+*Tested:* logical sketch size and measured peak memory of BJKST versus the exact set, as $d$ and $\eps$ vary (RQ2, H2).
+
+```{r fig-memory, results='asis'}
+todo_fig("fig_memory_vs_cardinality.pdf",
+         "Memory of BJKST and of the exact hash set against true cardinality (logical sketch size and measured peak memory shown separately).",
+         "memory",
+         "Log-log plot of memory vs d for exact set and for BJKST at several epsilon.")
+```
+
+```{r tab-memory, results='asis'}
+todo_tab("tab_memory.csv",
+         "Memory measurements and memory savings per configuration.",
+         "memory-summary",
+         "CSV with columns: stream, eps, d_true, max_buffer, sketch_bits, bjkst_peak_bytes, exact_peak_bytes, saving.")
+```
+
+\begin{todobox}
+\textbf{Observed result:} report the largest buffer observed against $\tau$, the cardinality at which BJKST starts to use less memory than the exact set, and the saving at the largest tested $d$. \textbf{Interpretation prompt:} how much of the measured peak memory is language/runtime overhead rather than sketch content? Compare the scaling in $\eps$ with $\tau=\Theta(1/\eps^2)$.
+\end{todobox}
+
+## Runtime and scaling {#sec:res-runtime}
+
+*Tested:* processing time versus stream length for BJKST and the exact set (RQ3, H3).
+
+```{r fig-runtime, results='asis'}
+todo_fig("fig_runtime_vs_streamlen.pdf",
+         "Total processing time against stream length for BJKST and the exact hash set.",
+         "runtime",
+         "Plot of time vs m for both algorithms, optionally time per item vs m.")
+```
+
+```{r tab-runtime, results='asis'}
+todo_tab("tab_runtime.csv",
+         "Runtime measurements per configuration (median over repeated timings).",
+         "runtime-summary",
+         "CSV with columns: stream, m, eps, algorithm, median_seconds, per_item_ns.")
+```
+
+\begin{todobox}
+\textbf{Observed result:} per-item cost for each algorithm and its trend with $m$. \textbf{Interpretation prompt:} is the hashing cost visible? Does the data support the $O(1)$ amortised update claim, given the caveat about the pruning charge and the cost of $\mathrm{GF}(2^b)$ arithmetic?
+\end{todobox}
+
+## Accuracy--memory trade-offs
+
+*Tested:* the relationship between sketch size ($\tau$) and error across values of $\eps$ (RQ1, RQ2).
+
+```{r fig-tradeoff, results='asis'}
+todo_fig("fig_tradeoff_error_vs_memory.pdf",
+         "Median relative error against sketch size, over a range of $\\varepsilon$ values.",
+         "tradeoff",
+         "Plot of median (and tail) relative error vs max buffer size or sketch bits.")
+```
+
+\begin{todobox}
+\textbf{Observed result:} the fitted or visually observed relation between memory and error. \textbf{Interpretation prompt:} Proposition~\ref{prop:var} suggests relative standard deviation of order $\mu_Z^{-1/2}$ with $\mu_Z=\Theta(\tau)$; is the observed slope consistent, and over what range?
+\end{todobox}
+
+## Sensitivity to stream distribution
+
+*Tested:* whether error, memory and time differ across the four stream families at comparable $d$ (RQ4, H4).
+
+```{r fig-distribution, results='asis'}
+todo_fig("fig_distribution_sensitivity.pdf",
+         "Relative error of BJKST across stream distributions at matched true cardinality.",
+         "distribution",
+         "Box or violin plots of relative error per stream family, plus an ordering-invariance check if run.")
+```
+
+```{r tab-distribution, results='asis'}
+todo_tab("tab_distribution.csv",
+         "Error, memory and runtime per stream family.",
+         "distribution-summary",
+         "CSV with columns: stream, d_true, median_rel_err, q95_rel_err, max_buffer, median_seconds.")
+```
+
+\begin{todobox}
+\textbf{Observed result:} differences (or absence of differences) across families, with the ordering test result for fixed $h$. \textbf{Interpretation prompt:} relate any difference to the fact that the output is a function of $h$ and the \emph{set} of distinct items; if a difference appears, check whether it is explained by different $d$ rather than by the distribution.
+\end{todobox}
+
+## Variability across random seeds and repeated trials
+
+*Tested:* the distribution of the estimate over independent seeds, the empirical failure rate, and the effect of the median of $k$ copies (RQ5, H5).
+
+```{r fig-seeds, results='asis'}
+todo_fig("fig_seed_variability.pdf",
+         "Distribution of the relative error over independent seeds, for a single copy and for the median of several copies.",
+         "seeds",
+         "Histogram or ECDF of relative error over seeds; failure threshold epsilon marked.")
+```
+
+```{r tab-failure, results='asis'}
+todo_tab("tab_failure_rate.csv",
+         "Empirical failure rate with confidence interval for single copy and median of $k$ copies.",
+         "failure-rate",
+         "CSV with columns: eps, k, trials, failure_rate, ci_low, ci_high.")
+```
+
+\begin{todobox}
+\textbf{Observed result:} spread, tails, and failure rates against $1/6$ (single copy) and against the target $\delta$ for the median. \textbf{Interpretation prompt:} is the number of trials adequate for the confidence interval to discriminate between the observed rate and the bound?
+\end{todobox}
+
+## Hash-function sensitivity
+
+*Tested:* the effect of the hash family of Table \ref{tab:hash-choices} on error and on the distribution of $\zeros(h(a))$ (RQ6, H6).
+
+```{r fig-hash, results='asis'}
+todo_fig("fig_hash_sensitivity.pdf",
+         "Relative error and empirical distribution of trailing zeros for the hash functions compared.",
+         "hash",
+         "Panels: error by hash function and stream; histogram of zeros(h(a)) against the 2^{-z} law.")
+```
+
+```{r tab-hash, results='asis'}
+todo_tab("tab_hash.csv",
+         "Accuracy and runtime per hash function.",
+         "hash-summary",
+         "CSV with columns: hash, stream, eps, trials, median_rel_err, failure_rate, median_seconds.")
+```
+
+\begin{todobox}
+\textbf{Observed result:} differences between hash functions, and for each whether its trailing-zero distribution matches $2^{-z}$. \textbf{Interpretation prompt:} a difference points to a violated assumption of Chapter~\ref{ch:bjkst}; no difference only shows no effect on the tested streams, not that the guarantee holds.
+\end{todobox}
+
+# Comparative Analysis {#ch:comparison}
+
+## Exact hash set versus BJKST
+
+This chapter synthesises Chapter \ref{ch:results} into a comparison; it introduces no new experiments except the optional one in Section \ref{sec:hll}.
+
+```{r tab-comparison, results='asis'}
+todo_tab("tab_comparison_exact_vs_bjkst.csv",
+         "Exact hash set versus BJKST: error, memory, runtime across scales.",
+         "comparison",
+         "CSV with columns: stream, m, d_true, eps, algorithm, rel_err, peak_bytes, seconds.")
+```
+
+\begin{todobox}
+Compare along four axes, each supported by a table or figure of Chapter~\ref{ch:results}: \textbf{accuracy} (exact is error-free; BJKST error and failure rate), \textbf{memory} (including the cardinality threshold beyond which BJKST wins), \textbf{runtime} (hashing overhead versus set insertion), and \textbf{scalability} (behaviour as $d$ and $m$ grow). Avoid statements not backed by measurements.
+\end{todobox}
+
+## When approximate counting is beneficial
+
+\begin{todobox}
+Using the measured crossover, state the regime (values of $d$, $\eps$, available memory) in which BJKST's memory saving outweighs its error, and the regime in which exact counting is preferable (for instance when $d<\tau/2$ BJKST is exact but offers no saving, since the buffer holds all items).
+\end{todobox}
+
+## Optional extension: comparison with HyperLogLog {#sec:hll}
+
+\begin{todobox}
+\evid{Future}: include this section only if HyperLogLog was implemented and evaluated with the same streams, seeds and metrics. Otherwise state in one sentence that no comparison was performed. If included, add the bibliographic reference for HyperLogLog (it is not in the source bibliography) and describe its estimator and parameters from that source, not from memory.
+\end{todobox}
+
+```{r fig-hll, results='asis'}
+todo_fig("fig_hll_comparison.pdf",
+         "Optional extension: BJKST and HyperLogLog compared at matched memory budgets.",
+         "hll",
+         "Plot of relative error against memory budget for BJKST and HyperLogLog on the same streams.")
+```
+
+## Limitations and fair-comparison considerations
+
+\begin{itemize}
+\item Memory accounting must be matched: logical bits versus process bytes; compare algorithms at equal memory budget or equal target error, and say which.
+\item Hash functions should be the same where possible, or the hashing cost reported separately.
+\item Implementation language and data-structure overhead can dominate sketch size at small scales.
+\item BJKST's guarantee is for pairwise independent hashing with constant $c=60$; HyperLogLog's guarantees are of a different kind (typically under fully random hashing), so error comparisons are empirical, not theoretical.
+\item Runtime comparisons depend on the machine and on implementation quality; report both under the same procedure.
+\end{itemize}
+
+# Interactive Demonstration {#ch:demo}
+
+\begin{todobox}
+This chapter describes only the demonstration that actually exists. Remove sub-sections that were not built. State the technology used and where it is hosted/run.
+\end{todobox}
+
+## Purpose and audience
+
+\placeholder{Who is the demonstration for (classmates, instructors, general audience) and what should they understand after using it?} The intended learning goals are: duplicates do not inflate the estimate; the sample is a random subset selected by hash value; the level $z$ rises as the buffer fills; and the estimate stays close to the true count with a small buffer.
+
+## Design and architecture
+
+\placeholder{Describe the architecture of the simulator or dashboard: the technology stack, how the BJKST implementation of Chapter \ref{ch:implementation} is reused (the demo must call the same core code, or state otherwise), and where the stream is generated.}
+
+## Adjustable parameters
+
+\begin{table}[htbp]
+\centering
+\caption{User-adjustable parameters of the demonstration (to be completed).}\label{tab:demo-params}
+\renewcommand{\arraystretch}{1.25}
+\small
+\begin{tabular}{L{3.6cm}L{5cm}L{4cm}}
+\toprule
+\textbf{Parameter} & \textbf{Meaning} & \textbf{Range} \\
+\midrule
+$\eps$ & accuracy / buffer threshold & \placeholder{range} \\
+Stream family & generator of Section \ref{sec:generators} & \placeholder{options} \\
+$m$, $d$ or duplicate rate & stream length and cardinality & \placeholder{ranges} \\
+Seed & random seed for $h$ and the stream & \placeholder{input} \\
+Hash function & Table \ref{tab:hash-choices} & \placeholder{options} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+## Live stream processing and sketch behaviour
+
+\placeholder{Describe what the user sees as items arrive: the current level $z$, the buffer contents $B$ with their $\zeros$ values, items being discarded at pruning, and duplicates being ignored.}
+
+## Estimated versus true cardinality and other metrics
+
+\placeholder{Describe the plots: estimate $\dhat$ and true $d$ against time $t$; relative error against time; buffer size against $\tau$; memory of BJKST versus the exact set.}
+
+```{r fig-demo-screenshot, results='asis'}
+todo_fig("fig_demo_screenshot.png",
+         "Screenshot of the interactive demonstration showing live estimate, true count, buffer size and sampling level.",
+         "demo",
+         "Screenshot of the running demo with a representative parameter setting.",
+         width = 0.9)
+```
+
+## Relation to the mathematical mechanism
+
+\placeholder{Map each interface element to a result of Chapter \ref{ch:bjkst}: the buffer to the set $S_z$ of Proposition \ref{prop:sample}; the level counter to the random final level $Z$ of Corollary \ref{cor:final}; the displayed estimate to $\dhat_Z$; the error trace to the guarantee of Theorem \ref{thm:accuracy}. Say explicitly that a single live run illustrates, but does not verify, the probabilistic guarantee.}
+
+## Limitations of the demonstration
+
+\placeholder{For example: only moderate stream sizes; a single random seed per run; any difference between the demo's hash function and the one analysed; browser/runtime memory not representative of the experiments of Chapter \ref{ch:results}.}
+
+# Discussion {#ch:discussion}
+
+\begin{todobox}
+This chapter must contain interpretation of the actual results only. Each subsection below gives prompts; delete the prompts and write the discussion once Chapter~\ref{ch:results} is complete. Keep \evid{Observation} and \evid{Interpretation} visibly separate.
+\end{todobox}
+
+## Agreement between theory and observation (RQ1, RQ2)
+
+Prompts: Did the measured error and failure rate agree with Theorem \ref{thm:accuracy} and with the variance of Proposition \ref{prop:var}? Was the buffer bounded by $\tau$ as in Corollary \ref{cor:final}? Where theory and measurement disagree, which assumption of Section \ref{sec:variant} is the likely cause, and what check would confirm it?
+
+## Accuracy and randomness (RQ5)
+
+Prompts: How wide were the error distributions? What did the seed-to-seed variability imply for how a single run should be interpreted? What did the median of $k$ copies change, and does it match Theorem \ref{thm:median}?
+
+## Memory--accuracy--runtime trade-offs (RQ2, RQ3)
+
+Prompts: At which $\eps$ does BJKST give a worthwhile memory saving? What is the runtime price? Is there a regime where exact counting dominates?
+
+## Distribution and hashing sensitivity (RQ4, RQ6)
+
+Prompts: Which stream families, if any, changed the behaviour, and is the change explained by $d$? Which hash functions, if any, deviated, and what does the trailing-zero histogram say about why?
+
+## Practical strengths and limitations
+
+Prompts: What would a practitioner need to know to use the sketch (choice of $\eps$, hash, memory model)? What did the experiments show about constants hidden by $O(\cdot)$ notation?
+
+## Unexpected results
+
+\begin{todobox}
+For each unexpected observation: what was seen, which hypothesis (H1--H6) it contradicts, the most plausible explanation, and whether it was tested (otherwise label it speculation).
+\end{todobox}
+
+## What the experiments establish
+
+\begin{todobox}
+Write a short, strictly bounded statement: which claims are supported by evidence (and over which parameter ranges and stream families), and which are not (for instance, anything about adversarial streams, other hash families, or scales beyond those tested).
+\end{todobox}
+
+# Limitations and Future Work {#ch:limitations}
+
+## Limitations
+
+\begin{description}
+\item[Algorithm variant.] Only the buffer-with-threshold form is analysed; its bound is not optimal (Section \ref{sec:space}, context), and its single-copy guarantee needs the median construction for small failure probability.
+\item[Hashing assumptions.] The analysis assumes a pairwise independent $h$ and a stream fixed independently of it; practical hash functions are outside the proved guarantee unless shown otherwise (Section \ref{sec:hashing-design}).
+\item[Implementation and measurement.] \placeholder{State language-level memory overhead, timer resolution, machine variability, and any simplification made in memory accounting.}
+\item[Experimental coverage.] \placeholder{State the ranges of $\eps$, $d$, $m$, $n$, seeds and stream families that were covered, and what was not.}
+\item[Constants.] If the threshold constant differs from $c=60$ in any experiment, the single-copy proof does not apply to it.
+\end{description}
+
+## Future work (not completed in this project)
+
+\evid{Future} The following are proposals only:
+
+\begin{itemize}
+\item HyperLogLog implementation and comparison (Section \ref{sec:hll}), if not completed.
+\item Alternative hash families and their effect on error; hashing with provable guarantees at lower cost.
+\item Adversarial or pathological streams (the analysis assumes a non-adaptive input; adaptive adversaries are outside it).
+\item The minimum-value (smallest hash values) variant mentioned in Section \ref{sec:bjkst-context}.
+\item Distributed or mergeable sketches, and sliding-window variants.
+\item Performance optimisation of the implementation.
+\end{itemize}
+
+\begin{todobox}
+Mark each item above as ``completed'' (and move it to the relevant chapter), ``attempted but incomplete'' or ``proposed''.
+\end{todobox}
+
+# Conclusion {#ch:conclusion}
+
+\begin{todobox}
+Keep to one page. Suggested structure; replace the prompts by statements traceable to earlier chapters.
+\begin{itemize}
+\item \textbf{Problem and approach:} distinct-element estimation in a stream; BJKST by hash-based nested sampling.
+\item \textbf{Theoretical result:} a single copy is a $(1\pm\eps)$-approximation with probability at least $5/6$ in $O(\eps^{-2}\log n)$ bits (identifier-storing form), a fingerprint form in $O(\log n+\eps^{-2}(\log\frac1\eps+\log\log n))$ bits with probability at least $2/3$, and a median of $\lceil18\ln(1/\delta)\rceil$ copies gives $1-\delta$ \cite{bjkst}.
+\item \textbf{Implementation:} what was built and checked (Chapter~\ref{ch:implementation}).
+\item \textbf{Principal findings:} the two or three results most strongly supported by Chapter~\ref{ch:results}, with numbers.
+\item \textbf{Lessons and limitations:} when to use approximate counting, and the main caveats of Chapter~\ref{ch:limitations}.
+\end{itemize}
+\end{todobox}
+
+\clearpage
+\addcontentsline{toc}{chapter}{References}
+\begin{thebibliography}{99}
+% Numbering follows the bibliography of WP1 so that the team's numbers agree.
+% Only works cited in the text are listed. Dashes in page ranges were lost in
+% the text extraction of WP1 and were restored; verify each entry.
+\bibitem[1]{bjkst} Z. Bar-Yossef, T. S. Jayram, R. Kumar, D. Sivakumar, L. Trevisan. Counting Distinct Elements in a Data Stream. In \emph{Randomization and Approximation Techniques in Computer Science (RANDOM 2002)}, LNCS vol.\ 2483, pp.\ 1--10, Springer, 2002.
+\bibitem[2]{ams} N. Alon, Y. Matias, M. Szegedy. The Space Complexity of Approximating the Frequency Moments. \emph{Journal of Computer and System Sciences} 58(1):137--147, 1999 (preliminary version in STOC 1996).
+\bibitem[3]{fm} P. Flajolet, G. N. Martin. Probabilistic Counting Algorithms for Data Base Applications. \emph{Journal of Computer and System Sciences} 31(2):182--209, 1985.
+\bibitem[4]{cw} J. L. Carter, M. N. Wegman. Universal Classes of Hash Functions. \emph{Journal of Computer and System Sciences} 18(2):143--154, 1979.
+\bibitem[5]{wc} M. N. Wegman, J. L. Carter. New Hash Functions and Their Use in Authentication and Set Equality. \emph{Journal of Computer and System Sciences} 22(3):265--279, 1981.
+\bibitem[6]{mu} M. Mitzenmacher, E. Upfal. \emph{Probability and Computing: Randomization and Probabilistic Techniques in Algorithms and Data Analysis}, 2nd edition. Cambridge University Press, 2017.
+\bibitem[7]{mr} R. Motwani, P. Raghavan. \emph{Randomized Algorithms}. Cambridge University Press, 1995.
+\bibitem[8]{clrs} T. H. Cormen, C. E. Leiserson, R. L. Rivest, C. Stein. \emph{Introduction to Algorithms}, 4th edition. MIT Press, 2022.
+\bibitem[9]{lru} J. Leskovec, A. Rajaraman, J. D. Ullman. \emph{Mining of Massive Datasets}, 3rd edition. Cambridge University Press, 2020. (Chapter 4, Mining Data Streams.)
+\bibitem[11]{muthu} S. Muthukrishnan. Data Streams: Algorithms and Applications. \emph{Foundations and Trends in Theoretical Computer Science} 1(2):117--236, 2005.
+\bibitem[12]{chak} A. Chakrabarti. \emph{Data Stream Algorithms} (lecture notes). Dartmouth College. \placeholder{year/URL not given in WP1; do not invent, obtain from the source}
+\bibitem[14]{iw} P. Indyk, D. P. Woodruff. Tight Lower Bounds for the Distinct Elements Problem. In \emph{Proc.\ 44th IEEE FOCS}, pp.\ 283--288, 2003.
+\bibitem[15]{wood} D. P. Woodruff. Optimal Space Lower Bounds for All Frequency Moments. In \emph{Proc.\ 15th ACM-SIAM SODA}, pp.\ 167--175, 2004.
+\bibitem[16]{knw} D. M. Kane, J. Nelson, D. P. Woodruff. An Optimal Algorithm for the Distinct Elements Problem. In \emph{Proc.\ 29th ACM PODS}, pp.\ 41--52, 2010.
+\end{thebibliography}
+
+\appendix
+
+# Extended Derivations {#app:derivations}
+
+\begin{todobox}
+Include here only derivations that were shortened in the main text and that a reader may wish to check.
+\end{todobox}
+
+## Bookkeeping of the constant $c$ in Theorem \ref{thm:accuracy}
+
+The failure probability is bounded by $\Prb[E_1]+\Prb[E_2]\le 2/c+8/c=10/c$. Requiring $10/c\le1/6$ gives $c\ge60$, which is the value used. For the fingerprint form the collision term $1/20$ is added, so the total is $1/6+1/20=13/60<1/3$. The choice $M=\lceil10\tau^2(b+1)^2\rceil$ makes $\tau^2(b+1)^2/(2M)\le1/20$. Smaller values of $c$ give a weaker proved bound ($10/c$ exceeds $1/6$) but may still perform well empirically; such experiments must be labelled accordingly.
+
+## Why the median of independent copies need only $\Prb[W_j=1]\le1/3$
+
+If each copy fails with probability $q_j\le1/3$, then $W=\sum_jW_j$ is stochastically dominated by a Binomial$(k,1/3)$ variable, so $\Prb[W\ge k/2]$ is at most the corresponding binomial tail, which Lemma \ref{lem:hoeff} bounds by $e^{-k/18}$. \placeholder{Add a formal coupling argument if required.}
+
+# Supplementary Experimental Results {#app:supp}
+
+```{r fig-supp-extra, results='asis'}
+todo_fig("fig_supp_extra.pdf",
+         "Supplementary plot (to be defined by the team): additional parameter settings not shown in Chapter 6.",
+         "supp-extra",
+         "Any supporting plot referred to from Chapter 6 or the discussion.")
+```
+
+```{r tab-supp-raw, results='asis'}
+todo_tab("tab_supp_raw_summary.csv",
+         "Supplementary summary table (to be defined by the team).",
+         "supp-raw",
+         "Aggregated results for settings not shown in Chapter 6.")
+```
+
+# Configuration and Reproducibility Details {#app:config}
+
+## Raw-results schema
+
+Per-trial results should be stored as CSV with at least the following columns, so that every table and figure of Chapter \ref{ch:results} can be regenerated from them.
+
+\begin{table}[htbp]
+\centering
+\caption{Suggested schema of the per-trial results file.}\label{tab:schema}
+\renewcommand{\arraystretch}{1.2}
+\small
+\begin{tabular}{L{3.8cm}L{9cm}}
+\toprule
+\textbf{Column} & \textbf{Meaning} \\
+\midrule
+\texttt{experiment\_id} & Identifier from Table \ref{tab:exp-status} \\
+\texttt{stream\_family}, \texttt{n}, \texttt{m} & Generator and its parameters \\
+\texttt{d\_true} & Exact cardinality from the baseline \\
+\texttt{algorithm}, \texttt{hash}, \texttt{eps}, \texttt{c}, \texttt{k} & Algorithm settings \\
+\texttt{seed\_stream}, \texttt{seed\_sketch} & Seeds \\
+\texttt{estimate} & Output $\dhat$ \\
+\texttt{max\_buffer}, \texttt{final\_level} & Maximum $|B|$ and final level $Z$ \\
+\texttt{seconds}, \texttt{peak\_bytes} & Runtime and measured memory \\
+\texttt{commit} & Code version \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{todobox}
+Paste the final configuration file and the exact regeneration commands here.
+\end{todobox}
+
+## Software environment of this document
+
+```{r session-info, echo=TRUE}
+# Environment in which this report was knitted (not of the experiments).
+cat("R version:", R.version.string, "\n")
+cat("Platform:", R.version$platform, "\n")
+cat("Knitted on:", format(Sys.Date()), "\n")
+cat("Results directory:", normalizePath(res_dir, mustWork = FALSE), "\n")
+cat("Results directory exists:", dir.exists(res_dir), "\n")
+```
+
+# Additional Pseudocode and Implementation Notes {#app:pseudocode}
+
+## Fingerprint form
+
+This is a direct transcription of the description in Section \ref{sec:space}; it is not claimed to be identical to the pseudocode of \cite{bjkst}.
+
+\begin{algorithm}[htbp]
+\caption{BJKST, fingerprint form (derived from the description in WP1)}\label{alg:fingerprint}
+\small
+\begin{tabbing}
+\hspace{1.8em}\=\hspace{1.5em}\=\hspace{1.5em}\=\hspace{1.5em}\=\kill
+\textbf{Require:} stream over $[n]$, $n=2^b$; $\eps\in(0,1)$ \\
+1:\> $\tau\leftarrow\lceil60/\eps^2\rceil$, \ $M\leftarrow\lceil10\tau^2(b+1)^2\rceil$ \\
+2:\> choose $h$ from the $\mathrm{GF}(2^b)$ family and an independent 2-universal $g:[n]\to[M]$ \\
+3:\> $B\leftarrow\emptyset$, \ $z\leftarrow0$ \\
+4:\> \textbf{for each} item $a$ \textbf{do} \\
+5:\>\> \textbf{if} $\zeros(h(a))\ge z$ \textbf{then} $B\leftarrow B\cup\{(g(a),\zeros(h(a)))\}$ \\
+6:\>\> \textbf{while} $|B|\ge\tau$ \textbf{do} $z\leftarrow z+1$; $B\leftarrow\{(x,\beta)\in B:\beta\ge z\}$ \\
+7:\> \textbf{return} $|B|\cdot2^z$
+\end{tabbing}
+\end{algorithm}
+
+\begin{todobox}
+Add further implementation notes: the field multiplication routine for $\mathrm{GF}(2^b)$, bit-manipulation of $\zeros$, handling of $\zeros(0)=b$, and any details that did not fit in Chapter~\ref{ch:implementation}.
+\end{todobox}
+
+# Team Contribution Record {#app:team}
+
+\begin{table}[htbp]
+\centering
+\caption{Team contributions. Fill in names and tasks only after the team has confirmed them.}\label{tab:team}
+\renewcommand{\arraystretch}{1.3}
+\small
+\begin{tabular}{L{5cm}L{3.6cm}L{4.2cm}}
+\toprule
+\textbf{Area} & \textbf{Member(s)} & \textbf{Confirmed contribution} \\
+\midrule
+Mathematical foundations & \placeholder{name(s)} & \placeholder{summary} \\
+Algorithm and software implementation & \placeholder{name(s)} & \placeholder{summary} \\
+Experimental design and analysis & \placeholder{name(s)} & \placeholder{summary} \\
+Visualisation and demonstration & \placeholder{name(s)} & \placeholder{summary} \\
+Experiment engineering and reproducibility & \placeholder{name(s)} & \placeholder{summary} \\
+Report writing and presentation & \placeholder{name(s)} & \placeholder{summary} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% WP1 identifies its author as the Mathematical Lead; confirm the name and role
+% with the team before entering it in the table above.
