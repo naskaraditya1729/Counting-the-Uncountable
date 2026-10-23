@@ -85,7 +85,12 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 res_dir <- "results"   # folder in which experiment outputs are expected
 
 # Escape characters that are special in LaTeX text mode.
-tex_esc <- function(x) gsub("([_#%&$])", "\\\\\\1", x)
+tex_esc <- function(x) {
+  x <- gsub("([_#%&${}])", "\\\\\\1", x)
+  x <- gsub("\\^", "\\\\textasciicircum{}", x)
+  x <- gsub("~", "\\\\textasciitilde{}", x)
+  x
+}
 ```
 
 ```{r helpers, include=FALSE}
@@ -956,7 +961,7 @@ todo_tab("tab_failure_rate.csv",
 todo_fig("fig_hash_sensitivity.pdf",
          "Relative error and empirical distribution of trailing zeros for the hash functions compared.",
          "hash",
-         "Panels: error by hash function and stream; histogram of zeros(h(a)) against the 2^{-z} law.")
+         "Panels: error by hash function and stream; histogram of trailing zeros of h(a) against the geometric law with ratio one half.")
 ```
 
 ```{r tab-hash, results='asis'}
